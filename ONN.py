@@ -1,9 +1,15 @@
+"""
+Those function are better illustrated in ONN_training.ipynb.
+This file allows to import ONN in another file/notebook.
+ONN class is scikit-learn style class of a basic Optical Neural Network.
+"""
+
 import jax
 from jax import numpy as np
 import numpy as npo
 
 random_seed=1
-noisy=False
+MZI_STRAT="MZI_norm" # "MZI", "MZI_norm", "MZI_noisy"
 
 def get_key():
     global random_seed
@@ -63,7 +69,18 @@ def MZI(X, teta):
     out_vector = np.dot(R, X)
     return out_vector
 
-def noisy_MZI(X, teta):
+def MZI_norm(X, teta):
+    X=normalization(X)
+    teta=normalization(teta)
+    R = np.array([
+        [np.cos(teta), -np.sin(teta)],
+        [np.sin(teta), np.cos(teta)]
+    ])
+    out_vector = np.dot(R, X)
+    out_vector=normalization(out_vector)
+    return out_vector
+
+def MZI_noisy(X, teta):
     p_signal = 2. ** 8
     p_weights = 2. ** 8
     noise_signal = 1e-4
@@ -79,10 +96,8 @@ def noisy_MZI(X, teta):
     return y
 
 def MZI_col(X, nb_mzi, W):
-    if noisy:
-        MZI_strat = noisy_MZI
-    else:
-        MZI_strat = MZI
+    strats={"MZI":MZI, "MZI_norm":MZI_norm, "MZI_noisy":MZI_noisy}
+    mzi_func = starts[MZI_STRAT]
 
     # Column type: odd or even ?
     nb_pins = nb_mzi * 2
@@ -105,7 +120,7 @@ def MZI_col(X, nb_mzi, W):
         local_inp = X[first_pin_pos:second_pin_pos + 1]
 
         # compute the output vector
-        local_out = MZI_strat(local_inp, W[ID])
+        local_out = mzi_func(local_inp, W[ID])
         layer_outputs.append(local_out)
 
     if start_pin_id == 1:
