@@ -7,11 +7,13 @@ ONN class is scikit-learn style class of a basic Optical Neural Network.
 import jax
 from jax import numpy as np
 import numpy as npo
+from typing import *
 
 random_seed=1
 MZI_STRAT="MZI_norm" # "MZI", "MZI_norm", "MZI_noisy"
 
 def get_key():
+    """ random number generator """
     global random_seed
     random_seed+=1
     return jax.random.PRNGKey(random_seed)
@@ -95,9 +97,10 @@ def MZI_noisy(X, teta):
 
     return y
 
-def MZI_col(X, nb_mzi, W):
+
+def MZI_col0(X, nb_mzi, W):
     strats={"MZI":MZI, "MZI_norm":MZI_norm, "MZI_noisy":MZI_noisy}
-    mzi_func = starts[MZI_STRAT]
+    mzi_func = strats[MZI_STRAT]
 
     # Column type: odd or even ?
     nb_pins = nb_mzi * 2
@@ -106,7 +109,7 @@ def MZI_col(X, nb_mzi, W):
     elif nb_pins + 2 == len(X):
         start_pin_id = 1
     else:
-        raise ValueError("This mesh patern is not compatible with this input size and #MZIs")
+        raise ValueError("This mesh pattern is not compatible with this input size and #MZIs")
 
     # pin them
     layer_outputs = []
@@ -129,23 +132,68 @@ def MZI_col(X, nb_mzi, W):
     Y = np.concatenate(layer_outputs)
     return Y
 
-def mzi_mesh(nb_units): # Example: 6->3,2,3,2,3,2 , 4->2,1,2,1
-    cols = nb_units
-    mzi_per_col = nb_units // 2
+def split(input_size, centred_window_size)->Tuple[int, int]:
+    if centred_window_size>input_size:
+        raise ValueError("Unexpected condition: should be true: centred_window_size*2<=input_size")
+    part_A_size=int((input_size - centred_window_size) / 2)
+
+    if (part_A_size*2+centred_window_size) == input_size:
+        part_B_size = part_A_size
+    else:
+        part_B_size = part_A_size - 1 # not expected
+    if centred_window_size+part_A_size+part_B_size!=input_size:
+        raise ValueError("Unexpeced condition: should be true: centred_window_size+part_A_size+part_B_size==input_size")
+    return part_A_size, part_B_size
+def MZI_col(X, nb_mzi, W):
+    strats={"MZI":MZI, "MZI_norm":MZI_norm, "MZI_noisy":MZI_noisy}
+    mzi_func = strats[MZI_STRAT]
+
+
+
+    pin_identity_part_A,pin_identity_part_B = split(len(X), nb_mzi*2)
+
+    # pin them
+    layer_outputs = []
+    for i in range(pin_identity_part_A):
+        layer_outputs.append(np.array([X[i]]))
+
+    first_pin_pos=0
+    second_pin_pos=0
+    for ID in range(0, nb_mzi):
+        # take input vector
+        first_pin_pos = 2 * ID + pin_identity_part_A
+        second_pin_pos = first_pin_pos + 1
+        local_inp = X[first_pin_pos:second_pin_pos + 1]
+
+        # compute the output vector
+        local_out = mzi_func(local_inp, W[ID])
+        layer_outputs.append(local_out)
+
+    for i in range(pin_identity_part_A):
+        layer_outputs.append(np.array([X[i+second_pin_pos+1]]))
+
+    Y = np.concatenate(layer_outputs)
+    return Y
+
+def column_size_for_square_mzi_mesh(matrix_rank)->List[int]: # Example: 6->3,2,3,2,3,2 , 4->2,1,2,1
+    cols = matrix_rank
+    mzi_per_col = matrix_rank // 2 # when `nb_unis` is "6" `mzi_per_col` is 3
     nb_mzis = []
     for i in range(cols):
-        nb_mzis.append(mzi_per_col - i % 2)
+        nb_mzi_this_col=mzi_per_col - i % 2
+        if nb_mzi_this_col>0:
+            nb_mzis.append(nb_mzi_this_col)
     return nb_mzis
 
 def mesh(X, nb_mzis, weights):
-    nb_layers = len(weights)
+    nb_mzi_col = len(weights)
 
-    def recusive_column_builder(id_layer=0):
-        if id_layer == nb_layers - 1:  # last layer. No dependency
-            y = MZI_col(X, nb_mzis[id_layer], weights[id_layer])
+    def recusive_column_builder(id_column=0):
+        if id_column == nb_mzi_col - 1:  # last layer. No dependency
+            y = MZI_col(X, nb_mzis[id_column], weights[id_column])
         else:
-            y = recusive_column_builder(id_layer + 1)
-            y = MZI_col(y, nb_mzis[id_layer], weights[id_layer])
+            y = recusive_column_builder(id_column + 1)
+            y = MZI_col(y, nb_mzis[id_column], weights[id_column])
         return y
 
     Y = recusive_column_builder()
@@ -155,14 +203,22 @@ def glorot_init(nb_mzi):
     weights = jax.random.normal(shape=(nb_mzi,), key=get_key(), dtype=np.float32) * np.sqrt(0.5)
     return weights
 
-def MSE(y_pred, y_expected):
-    return np.mean((y_expected - y_pred) ** 2)
-
+def MSE(y_expected, y_pred):
+    A,B=split(len(y_pred), len(y_expected))
+    try:
+        return np.mean((y_expected - y_pred[A:A+len(y_expected)]) ** 2)
+    except:
+        print("ok")
 def accuracy(Y, y_preds):
     nb_correct = 0
     for y_pred, y in zip(y_preds, Y):
         nb_correct += np.argmax(y_pred) == np.argmax(y)
     return float(nb_correct) / len(Y)
+
+def identity(x):
+    return x
+def relu(x):
+    return np.maximum(x,0.)
 
 class ONN:
     def __init__(self, hp):
@@ -185,24 +241,32 @@ class ONN:
         # building mzis
         self.nb_mzis=[]
         for units in self.hp["layers"]:
-            layer_mzis=mzi_mesh(units)
-            self.nb_mzis.extend(layer_mzis)
+            layer_mzis=column_size_for_square_mzi_mesh(units)
+            self.nb_mzis.append(layer_mzis)
 
         # initializing weights
-        self.W=[]
-        for n in self.nb_mzis:
-            self.W.append(glorot_init(n))
+        self.W=[] # 2D array, layer x mzicolumn
+        for mzi_layer in self.nb_mzis:
+            layer=[]
+            for nb_mzi_col in mzi_layer:
+                layer.append(glorot_init(nb_mzi_col))
+            self.W.append(layer)
 
         # compilation of the forward
         def forward(X, W):
-            return mesh(X, self.nb_mzis, W)
+            y=X
+            for i in range(len(W)):
+                y=mesh(y, self.nb_mzis[i], W[i])
+                if i<len(W)-1: # not the last
+                    y=np.maximum(y,0)
+            return y
         self.compiled_forward = jax.jit(forward)  # JIT func. is ~3300 times faster!
 
         # compilation of the backward
         def forward_with_loss(*args):
             y_pred = forward(*(args[0], args[2]))  # 0:X, 2:W
             y_expected = args[1]  # 1:Y
-            loss = self.loss(y_pred, y_expected)
+            loss = self.loss(y_expected, y_pred)
             return loss
 
         self.compiled_forward_with_loss = jax.jit(forward_with_loss)
@@ -214,6 +278,10 @@ class ONN:
         return not (self.W is None)
 
     def fit(self, X, Y, X_test=None, Y_test=None):
+        # Init
+        if not self.check_initialized():
+            self.initialize()
+
         cur_lr = self.hp["lr"]
         ids = npo.array(range(len(X)))
         for e in range(self.hp["epochs"]):  # for each epoch
@@ -226,10 +294,12 @@ class ONN:
             # Training
             for x_train, y_train in zip(X, Y):  # for each data sample
                 # backward phase
-                dW = self.compiled_backward_with_loss(x_train, y_train, self.W)[0]
+                nn_dW = self.compiled_backward_with_loss(x_train, y_train, self.W)[0]
+
                 # Update using the gradient information
-                for i, dWi in enumerate(dW):
-                    self.W[i] = self.W[i] - cur_lr * dWi
+                for layer_id, layer_dW in enumerate(nn_dW):
+                    for col_id, col_wD in enumerate(layer_dW):
+                        self.W[layer_id][col_id] = self.W[layer_id][col_id] - cur_lr * col_wD #error with col_Wd
 
             # Evaluate
             if X_test is not None and Y_test is not None:
@@ -239,7 +309,12 @@ class ONN:
 
     def evaluate(self, X, Y):
         y_preds=self.predict(X)
-        return self.metrics(Y, y_preds)
+
+        m=0
+        for yi, ypi in zip(Y, y_preds):
+           m += self.metrics(yi, ypi)/len(Y)
+
+        return m
 
     def predict(self, X):
         preds=[]
@@ -248,15 +323,19 @@ class ONN:
             preds.append(y)
         return np.array(preds)
 
+
+if __name__=="__main__":
+    hp = {"lr": 0.01, "lr_decay": 1., "layers": [8, 4], "epochs": 8}
+    model = ONN(hp)
+    model.initialize()
+
+    X = np.array([[0.1, 0.9, 0, 0, 0.1, 0.9, 0, 0], [0.9, 0.1, 0, 0, 0.1, 0.9, 0, 0]])
+    Y = np.array([[0.9, 0.1, 0, 0], [0.1, 0.9, 0, 0]])
+
+    model.fit(X, Y, X, Y)
+
 """
-hp={"lr":0.01, "lr_decay":1., "layers":[2], "epochs": 8}
-model=ONN(hp)
-model.initialize()
 
-X=np.array([[0.1,0.9],[0.9,0.1]])
-Y=np.array([[0.9,0.1],[0.1,0.9]])
-
-model.fit(X, Y, X, Y)
 # 0.64163846
 # 0.64162725
 # 0.64161617
