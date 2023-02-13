@@ -92,10 +92,12 @@ def split(input_size, centred_window_size) -> Tuple[int, int]:
 
 
 def MZI_col(X, nb_mzi, W):
+    assert(len(X) % 2 == 0)
     pin_identity_part_A, pin_identity_part_B = split(len(X), nb_mzi * 2)
 
     cos_W = np.cos(W)
     sin_W = np.sin(W)
+    pinnable_X=X.reshape((len(X)//2, 2, 1))
 
     # pin them
     layer_outputs = []
@@ -192,13 +194,13 @@ def relu(x):
 
 
 class ONN:
-    def __init__(self, hp, noise={}, optim={}, jit=True):
+    def __init__(self, hp, noise:Dict={}, optim:Dict={}, jit=True):
         assert ("layers" in hp)
         assert ("lr" in hp)
         assert ("lr_decay" in hp)
-        self.epochs=optim["epochs"]
-        self.loss=optim["loss"]
-        self.metrics=optim["metrics"]
+        self.epochs=optim.get("epochs", 10)
+        self.loss=optim.get("loss", MSE)
+        self.metrics=optim.get("metrics", accuracy)
 
         self.hp = hp
 
@@ -256,7 +258,6 @@ class ONN:
         # Init
         if not self.check_initialized():
             self.initialize()
-        print("Start training ...")
 
         cur_lr = self.hp["lr"]
         ids = npo.array(range(len(X)))
@@ -268,9 +269,8 @@ class ONN:
             Y = Y[ids]
 
             # Training
+            start_time = time.time()
             for x_train, y_train in zip(X, Y):  # for each data sample
-
-                #start_time = time.time()
                 # backward phase
                 nn_dW = self.compiled_backward_with_loss(x_train, y_train, self.W)[0]
 
@@ -278,7 +278,7 @@ class ONN:
                 for layer_id, layer_dW in enumerate(nn_dW):
                     for col_id, col_wD in enumerate(layer_dW):
                         self.W[layer_id][col_id] = self.W[layer_id][col_id] - cur_lr * col_wD  # error with col_Wd
-                #print("training step: ", time.time() - start_time)
+            print("training step: ", time.time() - start_time)
 
             # Evaluate
             if X_test is not None and Y_test is not None:
@@ -307,11 +307,11 @@ class ONN:
 if __name__ == "__main__":
     from ANN import get_db
 
-    n = 16
+    n = 10
     n_features = n * n
     DB = "MNIST"
 
-    (train_X, train_y2), (test_X, test_y2) = get_db(DB, n)
+    (train_X, train_y2), (test_X, test_y2) = get_db(DB, interpol_out=n, cropping_out=25)
 
     # conversion into jax.numpy array
     train_X = np.array(train_X)
