@@ -92,12 +92,12 @@ def split(input_size, centred_window_size) -> Tuple[int, int]:
 
 
 def MZI_col(X, nb_mzi, W):
-    assert(len(X) % 2 == 0)
+    assert (len(X) % 2 == 0)
     pin_identity_part_A, pin_identity_part_B = split(len(X), nb_mzi * 2)
 
     cos_W = np.cos(W)
     sin_W = np.sin(W)
-    pinnable_X=X.reshape((len(X)//2, 2, 1))
+    pinnable_X = X.reshape((len(X) // 2, 2, 1))
 
     # pin them
     layer_outputs = []
@@ -114,6 +114,7 @@ def MZI_col(X, nb_mzi, W):
     window_out = jax.vmap(pinning)(npo.arange(nb_mzi))
     window_out = np.concatenate(window_out)
     layer_outputs.extend(window_out)
+
     """
     # for loop version is slower
     for ID in range(nb_mzi):
@@ -129,18 +130,29 @@ def MZI_col(X, nb_mzi, W):
     return Y
 
 
-def column_size_for_square_mzi_mesh(matrix_rank) -> List[int]:  # Example: 6->3,2,3,2,3,2 , 4->2,1,2,1
-    cols = matrix_rank
+def column_size_for_square_mzi_mesh(matrix_rank, col_layer_limit=1000000, pattern="rectangle") -> List[int]:  # Example: 6->3,2,3,2,3,2 , 4->2,1,2,1
+    assert(pattern in {"rectangle", "triangle"})
+    cols = min(matrix_rank, col_layer_limit)
     mzi_per_col = matrix_rank // 2  # when `nb_unis` is "6" `mzi_per_col` is 3
     nb_mzis = []
-    for i in range(cols):
-        nb_mzi_this_col = mzi_per_col - i % 2
-        if nb_mzi_this_col > 0:
-            nb_mzis.append(nb_mzi_this_col)
+
+    print(matrix_rank)
+    if pattern=="rectangle":
+        for i in range(cols):
+            nb_mzi_this_col = mzi_per_col - i % 2
+            if nb_mzi_this_col > 0:
+                nb_mzis.append(nb_mzi_this_col)
+    elif pattern=="triangle":
+        for i in range(cols):
+            nb_mzi_this_col = mzi_per_col - i
+            if nb_mzi_this_col > 0:
+                nb_mzis.append(nb_mzi_this_col)
+    else:
+        raise ValueError("Unexpected pattern")
     return nb_mzis
 
 
-def mesh(X, nb_mzis, weights, noise: Dict = {}):
+def mesh0(X, nb_mzis, weights, noise: Dict = {}):
     nb_mzi_col = len(weights)
 
     if "sp" in noise and "sn" in noise:
@@ -164,6 +176,28 @@ def mesh(X, nb_mzis, weights, noise: Dict = {}):
         Y = additive_noise(precion_reduction(normalization(Y), noise["sp"]), noise["sn"])
 
     return Y
+
+
+def mesh(X, nb_mzis, weights, noise: Dict = {}):
+    nb_mzi_col = len(weights)
+
+    if "sp" in noise and "sn" in noise:
+        X = additive_noise(precion_reduction(normalization(X), noise["sp"]), noise["sn"])
+
+    if "wp" in noise and "wn" in noise:
+        weights = [additive_noise(stochastic_reduce_precision(normalization(w), noise["wp"]), noise["wn"]) for w in
+                   weights]
+
+    for id_column in range(len(nb_mzis)):
+        if id_column == 0:  # last layer. No dependency
+            y = MZI_col(X, nb_mzis[id_column], weights[id_column])
+        else:
+            y = MZI_col(y, nb_mzis[id_column], weights[id_column])
+
+    if "sp" in noise and "sn" in noise:
+        y = additive_noise(precion_reduction(normalization(y), noise["sp"]), noise["sn"])
+
+    return y
 
 
 def glorot_init(nb_mzi):
@@ -194,13 +228,19 @@ def relu(x):
 
 
 class ONN:
-    def __init__(self, hp, noise:Dict={}, optim:Dict={}, jit=True):
+    def __init__(self, hp, noise: Dict = {}, optim: Dict = {}, jit=True):
         assert ("layers" in hp)
         assert ("lr" in hp)
         assert ("lr_decay" in hp)
-        self.epochs=optim.get("epochs", 10)
-        self.loss=optim.get("loss", MSE)
-        self.metrics=optim.get("metrics", accuracy)
+        self.epochs = optim.get("epochs", 10)
+        self.loss = optim.get("loss", MSE)
+        self.metrics = optim.get("metrics", accuracy)
+
+        # Architecture
+        self.layers=hp["layers"]
+        self.col_layer_limit = hp["col_layer_limit"]
+        self.pattern = hp["pattern"]
+        assert( len(self.layers) == len(self.col_layer_limit) == len(self.pattern) )
 
         self.hp = hp
 
@@ -212,12 +252,11 @@ class ONN:
         self.compiled_forward_with_loss = None  # f2(X,Y,W)->loss
         self.compiled_backward_with_loss = None  # b(X,Y,W)->dW
 
-
     def initialize(self):
         # building mzis
         self.nb_mzis = []
-        for units in self.hp["layers"]:
-            layer_mzis = column_size_for_square_mzi_mesh(units)
+        for units, col_limit, mesh_pattern in zip(self.layers, self.col_layer_limit, self.pattern):
+            layer_mzis = column_size_for_square_mzi_mesh(units, col_limit, mesh_pattern)
             self.nb_mzis.append(layer_mzis)
 
         # initializing weights
@@ -247,7 +286,7 @@ class ONN:
         backward_with_loss = jax.grad(forward_with_loss, argnums=(-1,))
 
         self.compiled_forward = jax.jit(forward) if self.jit else forward  # JIT func. is ~3300 times faster!
-        #self.compiled_forward_with_loss = jax.jit(forward_with_loss) if self.jit else forward_with_loss # finalement on s'en sert pas
+        # self.compiled_forward_with_loss = jax.jit(forward_with_loss) if self.jit else forward_with_loss # finalement on s'en sert pas
         self.compiled_backward_with_loss = jax.jit(
             backward_with_loss) if self.jit else backward_with_loss  # JIT circuit is ~3300 times faster!
 
@@ -269,7 +308,6 @@ class ONN:
             Y = Y[ids]
 
             # Training
-            start_time = time.time()
             for x_train, y_train in zip(X, Y):  # for each data sample
                 # backward phase
                 nn_dW = self.compiled_backward_with_loss(x_train, y_train, self.W)[0]
@@ -278,7 +316,6 @@ class ONN:
                 for layer_id, layer_dW in enumerate(nn_dW):
                     for col_id, col_wD in enumerate(layer_dW):
                         self.W[layer_id][col_id] = self.W[layer_id][col_id] - cur_lr * col_wD  # error with col_Wd
-            print("training step: ", time.time() - start_time)
 
             # Evaluate
             if X_test is not None and Y_test is not None:
@@ -307,11 +344,11 @@ class ONN:
 if __name__ == "__main__":
     from ANN import get_db
 
-    n = 10
+    n = 16
     n_features = n * n
     DB = "MNIST"
 
-    (train_X, train_y2), (test_X, test_y2) = get_db(DB, interpol_out=n, cropping_out=25)
+    (train_X, train_y2), (test_X, test_y2) = get_db(DB, interpol_out=n, shuffle=True)
 
     # conversion into jax.numpy array
     train_X = np.array(train_X)
@@ -319,10 +356,14 @@ if __name__ == "__main__":
     test_X = np.array(test_X)
     test_y2 = np.array(test_y2)
 
-    hp = {"lr": 0.1, "lr_decay": 2., "layers": [n_features, 10]}
+    hp = {"lr": 0.1,
+          "lr_decay": 2.,
+          "layers": [n_features, 10],
+          "col_layer_limit": [8, 8],
+          "pattern":["rectangle", "triangle"]}
     # noise={"sn": 0.01, "wn": 0.01, "sp":2.**6, "wp":2.**6}
     noise = {}
-    optim={"loss":MSE, "metrics":accuracy, "epochs": 10}
+    optim = {"loss": MSE, "metrics": accuracy, "epochs": 10}
 
     model = ONN(hp, noise, optim, jit=True)
 

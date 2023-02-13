@@ -53,7 +53,6 @@ class TeacherStudent:
 
                 # Validation
                 valid_mse = self.evaluate_student(X_valid, Y_valid)
-                print("Student: ", valid_mse)
                 if valid_mse + self.epsilon > last_mse:
                     cont = False
                 last_mse = valid_mse
@@ -169,8 +168,8 @@ class TeacherStudent_SVD:
 
 
 def from_matrix_to_usv_photonic(calibration_data, matrix) -> Tuple[float, TeacherStudent_SVD]:
-    N = matrix.shape[1] # shape: dim_input, dim_output
-    hp_config = {"lr": 0.1, "lr_decay": 10., "layers": [N]}
+    N = matrix.shape[0] # shape: dim_input, dim_output
+    hp_config = {"lr": 0.1, "lr_decay": 10., "layers": [N], "col_layer_limit": [8], "pattern":["rectangle"]}
     training_config = {"epochs": 10, "loss": ONN.MSE, "metrics": ONN.MSE}
     noise_config = {}
     student_u = ONN.ONN(hp_config, noise_config, training_config)
@@ -183,8 +182,8 @@ def from_matrix_to_usv_photonic(calibration_data, matrix) -> Tuple[float, Teache
 
 
 def from_matrix_to_photonic(calibration_data, matrix) -> Tuple[float, TeacherStudent_SVD]:
-    N = matrix.shape[1]
-    hp_config = {"lr": 0.1, "lr_decay": 10., "layers": [N]}
+    N = matrix.shape[0]
+    hp_config = {"lr": 0.1, "lr_decay": 10., "layers": [N], "col_layer_limit": [8], "pattern":["rectangle"]}
     training_config = {"epochs": 10, "loss": ONN.MSE, "metrics": ONN.MSE}
     noise_config={}
 
