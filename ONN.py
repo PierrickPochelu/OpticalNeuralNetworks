@@ -204,10 +204,20 @@ def glorot_init(nb_mzi):
     weights = jax.random.normal(shape=(nb_mzi,), key=get_key(), dtype=np.float32) * np.sqrt(0.5)
     return weights
 
+def softmax(x):
+    """Compute softmax values for each sets of scores in x."""
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum(axis=0) # only difference
 
 def MSE(y_expected, y_pred):
     """ the lost takes 1 data """
     A, B = split(len(y_pred), len(y_expected))
+    return np.mean((y_expected - softmax(y_pred[A:A + len(y_expected)])) ** 2)
+
+def clipped_MSE(y_expected, y_pred):
+    """ the lost takes 1 data """
+    A, B = split(len(y_pred), len(y_expected))
+    y_expected=np.clip(y_expected, -1., +1.)
     return np.mean((y_expected - y_pred[A:A + len(y_expected)]) ** 2)
 
 
@@ -215,6 +225,8 @@ def accuracy(Y, y_preds):
     """ the metrics takes the overall database labels/predictions"""
     nb_correct = 0
     for y_pred, y in zip(y_preds, Y):
+        A, B = split(len(y_pred), len(y))
+        y_pred = y_pred[A:A + len(y)]
         nb_correct += np.argmax(y_pred) == np.argmax(y)
     return np.float32(nb_correct) / len(Y)
 
@@ -273,8 +285,9 @@ class ONN:
             for i in range(len(W)):
                 y = mesh(y, self.nb_mzis[i], W[i], self.noise)
                 if i < len(W) - 1:  # not the last
-                    y = np.maximum(y, 0)
+                    y = relu(y)
             return y
+            #return softmax(y)
 
         # compilation of the backward
         def forward_with_loss(*args):
@@ -344,7 +357,7 @@ class ONN:
 if __name__ == "__main__":
     from ANN import get_db
 
-    n = 16
+    n = 8
     n_features = n * n
     DB = "MNIST"
 
@@ -360,7 +373,7 @@ if __name__ == "__main__":
           "lr_decay": 2.,
           "layers": [n_features, 10],
           "col_layer_limit": [8, 8],
-          "pattern":["rectangle", "triangle"]}
+          "pattern":["rectangle", "rectangle"]}
     # noise={"sn": 0.01, "wn": 0.01, "sp":2.**6, "wp":2.**6}
     noise = {}
     optim = {"loss": MSE, "metrics": accuracy, "epochs": 10}
