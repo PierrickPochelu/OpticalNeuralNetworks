@@ -212,7 +212,7 @@ def softmax(x):
 def MSE(y_expected, y_pred):
     """ the lost takes 1 data """
     A, B = split(len(y_pred), len(y_expected))
-    return np.mean((y_expected - softmax(y_pred[A:A + len(y_expected)])) ** 2)
+    return np.mean((y_expected - y_pred[A:A + len(y_expected)]) ** 2)
 
 def clipped_MSE(y_expected, y_pred):
     """ the lost takes 1 data """
@@ -220,15 +220,28 @@ def clipped_MSE(y_expected, y_pred):
     y_expected=np.clip(y_expected, -1., +1.)
     return np.mean((y_expected - y_pred[A:A + len(y_expected)]) ** 2)
 
+def cross_entropy(targets, predictions, epsilon=1e-12):
+    """
+    Computes cross entropy between targets (encoded as one-hot vectors)
+    and predictions.
+    Input: predictions (N, k) ndarray
+           targets (N, k) ndarray
+    Returns: scalar
+    """
+    A, B = split(len(predictions), len(targets))
+    predictions=predictions[A:A + len(targets)]
+    predictions=softmax(predictions)
+    predictions = np.clip(predictions, epsilon, 1. - epsilon)
+    N = predictions.shape[0]
+    ce = -np.sum(targets*np.log(predictions+1e-9))/N
+    return ce
 
-def accuracy(Y, y_preds):
+def accuracy(y, y_pred):
     """ the metrics takes the overall database labels/predictions"""
-    nb_correct = 0
-    for y_pred, y in zip(y_preds, Y):
-        A, B = split(len(y_pred), len(y))
-        y_pred = y_pred[A:A + len(y)]
-        nb_correct += np.argmax(y_pred) == np.argmax(y)
-    return np.float32(nb_correct) / len(Y)
+    A, B = split(len(y_pred), len(y))
+    y_pred = y_pred[A:A + len(y)]
+    is_correct = np.argmax(y_pred) == np.argmax(y)
+    return is_correct
 
 
 def identity(x):
@@ -338,7 +351,15 @@ class ONN:
 
     def evaluate(self, X, Y):
         y_preds = self.predict(X)
-        return self.metrics(Y, y_preds)
+
+        A, B = split(len(y_preds), len(Y))
+        y_preds = y_preds[A:A + len(Y)]
+
+        cumul=0.
+        for yp, y in zip(y_preds, Y):
+            cumul += self.metrics(y, yp)
+
+        return cumul/len(Y)
 
     def predict(self, X):
         preds = []

@@ -1,5 +1,6 @@
 from typing import *
 from keras import backend as K
+import time
 import numpy as np
 from ONN import MSE, accuracy
 import ONN
@@ -24,8 +25,7 @@ class TeacherStudent:
         self.fraction_test = info.get("fraction_test", 0.1)
 
     def evaluate_student(self, X, Y):
-        student_preds = self.student.predict(X)
-        return MSE(Y, student_preds)
+        return self.student.evaluate(X, Y)
 
     def fit(self, X):
         nb_data = len(X)
@@ -42,7 +42,7 @@ class TeacherStudent:
         Y_test = self.teacher.predict(X_test)
 
         cur_lr = self.lr
-
+        st=time.time()
         while cur_lr > self.lr_min:
             cont = True
             last_mse = np.inf
@@ -56,6 +56,7 @@ class TeacherStudent:
                 if valid_mse + self.epsilon > last_mse:
                     cont = False
                 last_mse = valid_mse
+                print(valid_mse)
 
             # lr update
             cur_lr /= self.lr_decay
@@ -66,6 +67,7 @@ class TeacherStudent:
         print("Validation score: ", self.evaluate_student(X_valid, Y_valid))
         test = self.evaluate_student(X_test, Y_test)
         print("Testing score: ", test)
+        print("Time: ", time.time()-st)
         return test
 
 
@@ -103,8 +105,9 @@ class TeacherStudent_SVD:
         self.student_u = student_u
         self.student_v = student_v
 
-        self.teacher_student_u = TeacherStudent(self.teacher_u, student_u, teacher_student_config)
-        self.teacher_student_v = TeacherStudent(self.teacher_v, student_v, teacher_student_config)
+        self.teacher_w = TeacherMatrix(w) #hidden
+        self.teacher_student_u = TeacherStudent(self.teacher_u, self.student_u, teacher_student_config)
+        self.teacher_student_v = TeacherStudent(self.teacher_v, self.student_v, teacher_student_config)
 
     def fit(self, simulated_X):
         self.teacher_student_u.fit(simulated_X)
@@ -113,16 +116,9 @@ class TeacherStudent_SVD:
         # Compute ground truth
         offset = int(1. - (self.teacher_student_u.fraction_test + self.teacher_student_u.fraction_valid))
         test_X = simulated_X[offset:]
-        Y = []
-        for x in test_X:
-            yp = np.dot(self.w, x)
-            Y.append(yp)
-        Y = np.array(Y)
+        Y = self.teacher_w.predict(test_X)
 
-        # prediction
-        Y_preds = self.predict(test_X)
-
-        score = MSE(Y, Y_preds)
+        score = self.evaluate(test_X, Y)
         return score
 
     def predict(self, X):
@@ -159,9 +155,15 @@ class TeacherStudent_SVD:
         return np.array(Y_pred, dtype=np.float32)
 
     def evaluate(self, X, Y):
-        Y_pred = self.predict(X)
-        loss = MSE(Y, Y_pred)
-        return loss
+        Y_preds = self.predict(X)
+
+        A, B = ONN.split(len(Y_preds), len(Y))
+        y_preds = Y_preds[A:A + len(Y)]
+
+        cumul=0.
+        for y,yp in zip(Y, y_preds):
+            cumul += MSE(y, yp)
+        return cumul/len(X)
 
     def get_usv(self):
         return self.student_u.W, self.s, self.student_v.W
@@ -182,7 +184,7 @@ def from_matrix_to_usv_photonic(calibration_data, matrix) -> Tuple[float, Teache
 
 
 def from_matrix_to_photonic(calibration_data, matrix) -> Tuple[float, TeacherStudent_SVD]:
-    N = matrix.shape[0]
+    N = calibration_data.shape[1]
     hp_config = {"lr": 0.1, "lr_decay": 10., "layers": [N], "col_layer_limit": [8], "pattern":["rectangle"]}
     training_config = {"epochs": 10, "loss": ONN.MSE, "metrics": ONN.MSE}
     noise_config={}
@@ -261,6 +263,7 @@ def from_keras_to_photonic(calibration_data, test_X, test_Y, keras_path, prior_u
         x = onn_usv[0].predict(input_x)
         x = np.maximum(x, 0)
         x = onn_usv[1].predict(x)
+        return x
 
     global_test_Y = reconstructed_ONN(onn_usv, global_test_X)
 
