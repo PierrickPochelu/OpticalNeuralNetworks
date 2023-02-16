@@ -32,34 +32,40 @@ if __name__=="__main__":
     ############
     # TRAINING #
     ############
-    LR=0.1
-    LR_DECAY=10.
-    EPOCHS=5
-    DEBUG=True
+    from TeacherStudent import TeacherMatrix, TeacherStudent, TeacherStudent_SVD
+    import ONN
 
-    M,N=W1.shape
-    col_M=min(M,4) if DEBUG else M
-    col_N=min(N,4) if DEBUG else N
+    LR = 0.1
+    LR_DECAY = 10.
+    EPOCHS = 1
+    DEBUG = True
+
+    M, N = W1.shape
+    col_M = min(M, 4) if DEBUG else M  # at least 4 MZI column
+    col_N = min(N, 4) if DEBUG else N
+    hp_u = {"lr": LR, "lr_decay": LR_DECAY, "layers": [M], "pattern": ["rectangle"],
+            "col_layer_limit": [col_M]}
+    hp_v = {"lr": LR, "lr_decay": LR_DECAY, "layers": [N], "pattern": ["rectangle"], "col_layer_limit": [col_N]}
+    student_u_W1 = ONN.ONN(hp_u, {}, {"epochs": EPOCHS, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
+    student_v_W1 = ONN.ONN(hp_v, {}, {"epochs": EPOCHS, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
+    teacher_student_W1 = TeacherStudent_SVD(W1, student_u_W1, student_v_W1)
+
+    M, N = W2.shape
+    col_M = min(M, 4) if DEBUG else M
+    col_N = min(N, 4) if DEBUG else N
     hp_v = {"lr": LR, "lr_decay": LR_DECAY, "layers": [M], "pattern": ["rectangle"], "col_layer_limit": [col_M]}
-    hp_u = {"lr": LR, "lr_decay": LR_DECAY, "layers": [N], "pattern": ["rectangle"],
-            "col_layer_limit": [col_N]}
-    student_u_W1 = ONN.ONN(hp_v, {}, {"epochs": EPOCHS, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
-    student_v_W1 = ONN.ONN(hp_u, {}, {"epochs": EPOCHS, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
-    teacher_student_W1 = TeacherStudent_SVD(W1, student_u_W1, student_v_W1 )
+    hp_u = {"lr": LR, "lr_decay": LR_DECAY, "layers": [N], "pattern": ["rectangle"], "col_layer_limit": [col_N]}
 
-
-    M,N=W2.shape
-    col_M=min(M,4) if DEBUG else M
-    col_N=min(N-10,4) if DEBUG else N-10
-    hp_v = {"lr": LR, "lr_decay": LR_DECAY, "layers": [M], "pattern": ["triangle"], "col_layer_limit": [col_M]}
-    hp_u = {"lr": LR, "lr_decay": LR_DECAY, "layers": [N], "pattern": ["triangle"], "col_layer_limit": [col_N]}
-
-    student_u_W2 = ONN.ONN(hp_u, {}, {"epochs": EPOCHS, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
     student_v_W2 = ONN.ONN(hp_v, {}, {"epochs": EPOCHS, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
-    teacher_student_W2 = TeacherStudent_SVD(W2, student_u_W2, student_v_W2 )
+    student_u_W2 = ONN.ONN(hp_u, {}, {"epochs": EPOCHS, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
+    teacher_student_W2 = TeacherStudent_SVD(W2, student_u_W2, student_v_W2)
 
+
+
+    teacher_student_W1.fit(calib_data)
 
     # creating data for W2
+
     A=teacher_student_W1.predict(calib_data)
     A=np.maximum(A,0)
 

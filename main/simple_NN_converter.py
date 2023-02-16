@@ -31,8 +31,8 @@ if __name__=="__main__":
 
 
     hp = {"lr": 0.1, "lr_decay": 10., "layers": [W1.shape[0]], "pattern": ["rectangle"], "col_layer_limit": [4]}
-    student_u_W1 = ONN.ONN(hp, {}, {"epochs": 5, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
     student_v_W1 = ONN.ONN(hp, {}, {"epochs": 5, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
+    student_u_W1 = ONN.ONN(hp, {}, {"epochs": 5, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
     teacher_student_W1 = TeacherStudent_SVD(W1, student_u_W1, student_v_W1 )
 
     A=calib_data
@@ -42,8 +42,8 @@ if __name__=="__main__":
     hp_v = {"lr": 0.1, "lr_decay": 10., "layers": [W2.shape[0]], "pattern": ["triangle"], "col_layer_limit": [4]}
     hp_u = {"lr": 0.1, "lr_decay": 10., "layers": [W2.shape[1]], "pattern": ["triangle"], "col_layer_limit": [4]}
 
-    student_u_W2 = ONN.ONN(hp_u, {}, {"epochs": 1, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
     student_v_W2 = ONN.ONN(hp_v, {}, {"epochs": 1, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
+    student_u_W2 = ONN.ONN(hp_u, {}, {"epochs": 1, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
     teacher_student_W2 = TeacherStudent_SVD(W2, student_u_W2, student_v_W2 )
 
 
