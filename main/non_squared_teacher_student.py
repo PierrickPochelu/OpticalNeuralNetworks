@@ -11,7 +11,7 @@ if __name__=="__main__":
 
     # realistic data
     N = 8
-    nb_data = 1000
+    nb_data = 100
 
     (train_X, train_Y), (test_X, test_Y) = get_db("MNIST", N, shuffle=True)
     calib_data = train_X[:nb_data]
@@ -28,7 +28,7 @@ if __name__=="__main__":
     keras.backend.clear_session()
     del ann
 
-    hp = {"lr": 0.1, "lr_decay": 10., "layers": [W2.shape[0]], "pattern": ["triangle"], "col_layer_limit": [W2.shape[0]-10]}
+    hp = {"lr": 0.1, "lr_decay": 10., "layers": [W2.shape[0]], "pattern": ["triangle"], "col_layer_limit": [4]}
     student_W2 = ONN.ONN(hp, {}, {"epochs": 5, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
 
 

@@ -28,9 +28,11 @@ if __name__=="__main__":
     keras.backend.clear_session()
     del ann
 
-    hp = {"lr": 0.1, "lr_decay": 10., "layers": [W2.shape[0]], "pattern": ["triangle"], "col_layer_limit": [W2.shape[0]-10]}
-    student_u_W2 = ONN.ONN(hp, {}, {"epochs": 5, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
-    student_v_W2 = ONN.ONN(hp, {}, {"epochs": 5, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
+    hp_u = {"lr": 0.1, "lr_decay": 10., "layers": [W2.shape[1]], "pattern": ["triangle"], "col_layer_limit": [4]}
+    student_u_W2 = ONN.ONN(hp_u, {}, {"epochs": 5, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
+
+    hp_v = {"lr": 0.1, "lr_decay": 10., "layers": [W2.shape[0]], "pattern": ["triangle"], "col_layer_limit": [4]}
+    student_v_W2 = ONN.ONN(hp_v, {}, {"epochs": 5, "loss": ONN.clipped_MSE, "metrics": ONN.MSE})
 
     teacher_student_W2 = TeacherStudent_SVD(W2, student_u_W2, student_v_W2 )
 

@@ -1,4 +1,6 @@
 from typing import *
+
+import jax
 from keras import backend as K
 import time
 import numpy as np
@@ -93,7 +95,7 @@ class TeacherStudent_SVD:
         assert (hasattr(student_v, "predict"))
         assert (hasattr(student_v, "fit"))
 
-        u, s, vT = np.linalg.svd(w, full_matrices=False)
+        vT, s, u = np.linalg.svd(w, full_matrices=False) #TODO: warning inversion u and vT ?
         self.w = w
         self.s = s
         self.s_diag = np.diag(s)
@@ -101,7 +103,10 @@ class TeacherStudent_SVD:
         self.vT = vT
 
         self.teacher_u = TeacherMatrix(u)
+
+        # when W is MxN , u is MxN,  and vT is NxN
         self.teacher_v = TeacherMatrix(vT)
+
         self.student_u = student_u
         self.student_v = student_v
 
@@ -110,11 +115,20 @@ class TeacherStudent_SVD:
         self.teacher_student_v = TeacherStudent(self.teacher_v, self.student_v, teacher_student_config)
 
     def fit(self, simulated_X):
-        self.teacher_student_u.fit(simulated_X)
+        M,N=self.w.shape
+
         self.teacher_student_v.fit(simulated_X)
+        A=self.teacher_student_v.student.predict(simulated_X)
+
+        if M!=N:
+            def resize_rescale(x):
+                return x[:N]*self.s
+            A=jax.vmap(resize_rescale)(A)
+
+        self.teacher_student_u.fit(A)
 
         # Compute ground truth
-        offset = int(1. - (self.teacher_student_u.fraction_test + self.teacher_student_u.fraction_valid))
+        offset = int((1. - self.teacher_student_u.fraction_test)*len(simulated_X))
         test_X = simulated_X[offset:]
         Y = self.teacher_w.predict(test_X)
 
@@ -123,17 +137,29 @@ class TeacherStudent_SVD:
 
     def predict(self, X):
         Y_pred = []
-        N=X.shape[1] # shape: nb_data, nb_features
-        for xi in X:
-            # compute v.T*x
-            vTx = self.student_v.predict([xi])
+        M,N=self.w.shape
 
-            svTx = np.dot(self.s_diag, vTx.reshape((N, 1)))
+        is_squared=(M==N)
 
-            # compute u*v.T*x
-            usvTx = self.student_u.predict([svTx.squeeze()])
+        if is_squared:
+            for xi in X:
+                # compute v.T*x
+                vTx = self.student_v.predict([xi])
 
-            Y_pred.append(usvTx)
+                # s * (v.T*x)
+                svTx = np.dot(self.s_diag, vTx.reshape((N, 1)))
+
+                #  u*(s*(v.T*x))
+                usvTx = self.student_u.predict([svTx.squeeze()])
+
+                Y_pred.extend(usvTx)
+        else:
+            for xi in X:
+                vTx = self.student_v.predict([xi])
+                vTx=vTx[:, :N] # ignore other values
+                svTx = np.dot(self.s_diag, vTx.reshape((N, 1)))
+                usvTx = self.student_u.predict([svTx.squeeze()])
+                Y_pred.extend(usvTx)
 
         return np.array(Y_pred, dtype=np.float32)
 
@@ -158,10 +184,11 @@ class TeacherStudent_SVD:
         Y_preds = self.predict(X)
 
         A, B = ONN.split(len(Y_preds), len(Y))
-        y_preds = Y_preds[A:A + len(Y)]
+
 
         cumul=0.
-        for y,yp in zip(Y, y_preds):
+        for y,yp in zip(Y, Y_preds):
+            yp = yp[A:A + len(y)]
             cumul += MSE(y, yp)
         return cumul/len(X)
 
